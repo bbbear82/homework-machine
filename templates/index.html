@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF OCR Selection</title>
+    <style>
+        canvas { border: 1px solid black; cursor: crosshair; }
+    </style>
+</head>
+<body>
+    <h2>Upload Homework and Select Questions</h2>
+    <input type="file" id="pdfInput">
+    <br><br>
+    <canvas id="pdfCanvas"></canvas>
+    <br>
+    <button onclick="runOCR()">Run OCR</button>
+    
+    <h3>Enter a number:</h3>
+    <input type="number" id="intInput" />
+    <button onclick="sendInteger()">Submit</button>
+    <p id="RepeatCopy"></p>
+
+    <button onclick="callOpenAI()">call ChatGPT for similar questions and Download as PDf</button>
+    <pre id="output"></pre>
+
+    <script>
+        const canvas = document.getElementById('pdfCanvas');
+        const ctx = canvas.getContext('2d');
+        let startX, startY, isDrawing = false, rect = {};
+
+        const img = new Image();
+        img.onload = () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+        };
+        img.src = '/static/page.png';
+
+        canvas.onmousedown = e => {
+            startX = e.offsetX;
+            startY = e.offsetY;
+            isDrawing = true;
+        };
+        canvas.onmouseup = e => {
+            isDrawing = false;
+            rect = {
+                x: Math.min(startX, e.offsetX),
+                y: Math.min(startY, e.offsetY),
+                w: Math.abs(e.offsetX - startX),
+                h: Math.abs(e.offsetY - startY)
+            };
+            redraw();
+            ctx.strokeStyle = 'red';
+            ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        };
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+        }
+
+        document.getElementById('pdfInput').onchange = async function () {
+            const formData = new FormData();
+            formData.append('pdf', this.files[0]);
+            await fetch('/upload_pdf', { method: 'POST', body: formData });
+            location.reload();
+        };
+
+        async function runOCR() {
+            const res = await fetch('/run_ocr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(rect)
+            });
+            const data = await res.json();
+            document.getElementById('output').innerText = data.text;
+        }
+
+        function getFilenameFromContentDisposition(header) {
+            const match = /filename="?([^"]+)"?/.exec(header);
+            return match?.[1] || 'download.pdf';
+        }
+
+        async function callOpenAI() {
+            try {
+                const response = await fetch('/query_openai', {
+                method: 'GET'
+            });
+
+            if (!response.ok) {
+                throw new Error('Response not ok, Failed to fetch Query OpenAI or PDF');
+            }
+
+            const blob = await response.blob();
+            const contentDisposition = response.headers.get('Content-Disposition');
+            const filename = getFilenameFromContentDisposition(contentDisposition);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+            } catch (err) {
+                console.error('Error:', err);
+                alert('Could not query OpenAI or download PDF');
+            }
+        }
+
+
+        async function sendInteger() {
+            const input = document.getElementById('intInput').value;
+            const intValue = parseInt(input, 10);
+
+            if (isNaN(intValue)) {
+                alert("Please enter a valid integer.");
+                return;
+            }
+
+            const response = await fetch('/submit_integer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ number: intValue })
+            });
+
+            const result = await response.json();
+            document.getElementById('RepeatCopy').textContent = "Server says: " + result.message;
+        }
+
+
+
+    </script>
+</body>
+</html>
+
